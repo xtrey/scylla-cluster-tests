@@ -1,0 +1,99 @@
+# LWT Heavy Predefined Throughput Steps test — 3-node cluster
+#
+# Workload: Heavy LWT operations using cs_lwt_perf_big.yaml profile
+#   write  (stress_cmd_w)  — UPDATE ... IF <9-col condition>  (heavy: composite PK, wide row ~1.3KB)
+#   read   (stress_cmd_r)  — SELECT by composite PK           (serial read on wide row)
+#   mixed  (stress_cmd_m)  — UPDATE IF cond + SELECT          (50/50 mix)
+#
+# Designed to compare VNodes vs Tablets performance under ~1000 connections/shard
+# (connectionsPerHost=3750 across 4 loaders on a 3-node i4i.4xlarge cluster).
+#
+# Used by:
+#   scylla-enterprise-perf-regression-predefined-throughput-steps-lwt-heavy-vnodes.jenkinsfile
+#   scylla-enterprise-perf-regression-predefined-throughput-steps-lwt-heavy-tablets.jenkinsfile
+
+test_duration: 500
+
+# Keyspace and table come from cs_lwt_perf_big.yaml profile
+perf_stress_keyspace: ks
+perf_stress_table: targettable
+
+# Schema initialisation — create keyspace + table via a single LWT insert
+prepare_stress_cmd: "cassandra-stress user profile=/tmp/cs_lwt_perf_big.yaml 'ops(insert=1)' no-warmup cl=ALL n=1 -mode connectionsPerHost=8 cql3 native -rate 'threads=1'"
+
+# Preload ~120M rows total (4 loaders × 30M) — ~1.3 KB/row → ~156 GB total on-disk (i4i.4xlarge has 7.5 TB NVMe)
+# Prepare uses the batched 'insert' op for schema-compatible data population
+prepare_write_cmd: [
+    "cassandra-stress user profile=/tmp/cs_lwt_perf_big.yaml 'ops(insert=1)' no-warmup cl=ALL n=30000000 -mode connectionsPerHost=8 cql3 native -rate threads=50 -pop seq=1..30000000",
+    "cassandra-stress user profile=/tmp/cs_lwt_perf_big.yaml 'ops(insert=1)' no-warmup cl=ALL n=30000000 -mode connectionsPerHost=8 cql3 native -rate threads=50 -pop seq=30000001..60000000",
+    "cassandra-stress user profile=/tmp/cs_lwt_perf_big.yaml 'ops(insert=1)' no-warmup cl=ALL n=30000000 -mode connectionsPerHost=8 cql3 native -rate threads=50 -pop seq=60000001..90000000",
+    "cassandra-stress user profile=/tmp/cs_lwt_perf_big.yaml 'ops(insert=1)' no-warmup cl=ALL n=30000000 -mode connectionsPerHost=8 cql3 native -rate threads=50 -pop seq=90000001..120000000"
+]
+
+# Write LWT heavy — UPDATE ... IF <9-column condition>
+# connectionsPerHost=3750 matches PR#13446 baseline (~1000 cps target per shard on i4i.4xlarge)
+# $throttle and $duration are substituted by the gradual-steps framework at runtime
+stress_cmd_w: [
+    "cassandra-stress user profile=/tmp/cs_lwt_perf_big.yaml 'ops(write_stmt-update-if-cond=1)' no-warmup cl=QUORUM duration=$duration -mode connectionsPerHost=3750 cql3 native -rate 'threads=3750 $throttle' -pop seq=1..30000000",
+    "cassandra-stress user profile=/tmp/cs_lwt_perf_big.yaml 'ops(write_stmt-update-if-cond=1)' no-warmup cl=QUORUM duration=$duration -mode connectionsPerHost=3750 cql3 native -rate 'threads=3750 $throttle' -pop seq=30000001..60000000",
+    "cassandra-stress user profile=/tmp/cs_lwt_perf_big.yaml 'ops(write_stmt-update-if-cond=1)' no-warmup cl=QUORUM duration=$duration -mode connectionsPerHost=3750 cql3 native -rate 'threads=3750 $throttle' -pop seq=60000001..90000000",
+    "cassandra-stress user profile=/tmp/cs_lwt_perf_big.yaml 'ops(write_stmt-update-if-cond=1)' no-warmup cl=QUORUM duration=$duration -mode connectionsPerHost=3750 cql3 native -rate 'threads=3750 $throttle' -pop seq=90000001..120000000"
+]
+
+# Read LWT heavy — SELECT by composite PK (wide row ~1.3 KB)
+stress_cmd_r: [
+    "cassandra-stress user profile=/tmp/cs_lwt_perf_big.yaml 'ops(read_stmt-select=1)' no-warmup cl=QUORUM duration=$duration -mode connectionsPerHost=3750 cql3 native -rate 'threads=3750 $throttle' -pop seq=1..7500000",
+    "cassandra-stress user profile=/tmp/cs_lwt_perf_big.yaml 'ops(read_stmt-select=1)' no-warmup cl=QUORUM duration=$duration -mode connectionsPerHost=3750 cql3 native -rate 'threads=3750 $throttle' -pop seq=7500001..15000000",
+    "cassandra-stress user profile=/tmp/cs_lwt_perf_big.yaml 'ops(read_stmt-select=1)' no-warmup cl=QUORUM duration=$duration -mode connectionsPerHost=3750 cql3 native -rate 'threads=3750 $throttle' -pop seq=15000001..22500000",
+    "cassandra-stress user profile=/tmp/cs_lwt_perf_big.yaml 'ops(read_stmt-select=1)' no-warmup cl=QUORUM duration=$duration -mode connectionsPerHost=3750 cql3 native -rate 'threads=3750 $throttle' -pop seq=22500001..30000000"
+]
+
+# Cache warmup before read test — read the hot set at full speed with cl=ALL
+stress_cmd_cache_warmup: [
+    "cassandra-stress user profile=/tmp/cs_lwt_perf_big.yaml 'ops(read_stmt-select=1)' no-warmup cl=ALL n=7500000 -mode connectionsPerHost=3750 cql3 native -rate 'threads=3750' -pop seq=1..7500000",
+    "cassandra-stress user profile=/tmp/cs_lwt_perf_big.yaml 'ops(read_stmt-select=1)' no-warmup cl=ALL n=7500000 -mode connectionsPerHost=3750 cql3 native -rate 'threads=3750' -pop seq=7500001..15000000",
+    "cassandra-stress user profile=/tmp/cs_lwt_perf_big.yaml 'ops(read_stmt-select=1)' no-warmup cl=ALL n=7500000 -mode connectionsPerHost=3750 cql3 native -rate 'threads=3750' -pop seq=15000001..22500000",
+    "cassandra-stress user profile=/tmp/cs_lwt_perf_big.yaml 'ops(read_stmt-select=1)' no-warmup cl=ALL n=7500000 -mode connectionsPerHost=3750 cql3 native -rate 'threads=3750' -pop seq=22500001..30000000"
+]
+
+# Mixed LWT heavy — UPDATE IF cond + SELECT (50% heavy write LWT, 50% read)
+stress_cmd_m: [
+    "cassandra-stress user profile=/tmp/cs_lwt_perf_big.yaml 'ops(write_stmt-update-if-cond=1,read_stmt-select=1)' no-warmup cl=QUORUM duration=$duration -mode connectionsPerHost=3750 cql3 native -rate 'threads=3750 $throttle' -pop seq=1..7500000",
+    "cassandra-stress user profile=/tmp/cs_lwt_perf_big.yaml 'ops(write_stmt-update-if-cond=1,read_stmt-select=1)' no-warmup cl=QUORUM duration=$duration -mode connectionsPerHost=3750 cql3 native -rate 'threads=3750 $throttle' -pop seq=7500001..15000000",
+    "cassandra-stress user profile=/tmp/cs_lwt_perf_big.yaml 'ops(write_stmt-update-if-cond=1,read_stmt-select=1)' no-warmup cl=QUORUM duration=$duration -mode connectionsPerHost=3750 cql3 native -rate 'threads=3750 $throttle' -pop seq=15000001..22500000",
+    "cassandra-stress user profile=/tmp/cs_lwt_perf_big.yaml 'ops(write_stmt-update-if-cond=1,read_stmt-select=1)' no-warmup cl=QUORUM duration=$duration -mode connectionsPerHost=3750 cql3 native -rate 'threads=3750 $throttle' -pop seq=22500001..30000000"
+]
+
+round_robin: true
+
+n_db_nodes: 3
+n_loaders: 4
+
+instance_type_loader: 'c5d.2xlarge'
+instance_type_monitor: 't3.large'
+instance_type_db: 'i3en.2xlarge'
+use_capacity_reservation: true
+use_placement_group: false
+#use_placement_group: true
+nemesis_add_node_cnt: 0
+
+use_preinstalled_scylla: true
+
+user_prefix: 'perf-predefined-steps-lwt-heavy'
+argus_email_report_template: email_report_performance.yaml
+
+backtrace_decoding: true
+backtrace_stall_decoding: false
+
+use_mgmt: false
+email_recipients: ['scylla-perf-results@scylladb.com']
+
+use_hdrhistogram: true
+
+append_scylla_args: '--blocked-reactor-notify-ms 5 --abort-on-lsa-bad-alloc 1 --abort-on-seastar-bad-alloc --abort-on-internal-error 1 --abort-on-ebadf 1'
+append_scylla_yaml:
+  auto_snapshot: false
+
+use_prepared_loaders: false
+
+adaptive_timeout_store_metrics: false

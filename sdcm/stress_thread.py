@@ -137,12 +137,34 @@ class CassandraStressThread(DockerBasedStressThread):
         params = get_stress_cmd_params(stress_cmd)
         tag_suffix = "rt" if "fixed threads" in params else "st"
         if "user profile=" in stress_cmd:
-            # Examples:
-            # Write: ops(insert=1)
-            # Read: ops(read=2)
-            # Mixed: ops(insert=1,read=2)
-            # Only standard operations (read and insert) are supported per user profile stress command in this implementation
-            if "insert=" in stress_cmd:
+            # Named-statement convention (preferred for user-profile commands):
+            #   read_*  prefix → READ tag    e.g. ops(read_stmt-select=1)
+            #   write_* prefix → WRITE tag   e.g. ops(write_stmt-insert-if-not-exists=1)
+            #   mix_*   prefix → WRITE + READ e.g. ops(mix_lwt-write-read=1)
+            # Any combination of read_* + write_* in the same ops() also produces both tags.
+            # Backward-compat fallback: old unprefixed ops(insert=1) / ops(read=1) still work.
+            ops_match = re.search(r"ops\(([^)]+)\)", stress_cmd)
+            if ops_match:
+                ops_str = ops_match.group(1)
+                op_names = [op.strip().split("=")[0] for op in ops_str.split(",")]
+                has_write = any(name.startswith(("write_", "mix_")) for name in op_names)
+                has_read = any(name.startswith(("read_", "mix_")) for name in op_names)
+                if has_write or has_read:
+                    if has_write:
+                        self.hdr_tags.append(f"WRITE-{tag_suffix}")
+                    if has_read:
+                        self.hdr_tags.append(f"READ-{tag_suffix}")
+                # Backward-compat: unprefixed ops(insert=1) / ops(read=1)
+                elif "insert=" in ops_str:
+                    self.hdr_tags.append(f"WRITE-{tag_suffix}")
+                elif "read=" in ops_str:
+                    self.hdr_tags.append(f"READ-{tag_suffix}")
+                else:
+                    raise ValueError(
+                        "Cannot detect supported stress operation type from the stress command with user profile: %s",
+                        stress_cmd,
+                    )
+            elif "insert=" in stress_cmd:
                 self.hdr_tags.append(f"WRITE-{tag_suffix}")
             elif "read=" in stress_cmd:
                 self.hdr_tags.append(f"READ-{tag_suffix}")

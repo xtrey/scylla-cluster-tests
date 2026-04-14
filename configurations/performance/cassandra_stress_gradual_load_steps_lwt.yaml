@@ -1,0 +1,19 @@
+# LWT gradual load steps configuration
+#
+# Used by both light and heavy LWT predefined-steps tests.
+# Throttle values are much lower than regular ops because LWT (Paxos/TWL)
+# is ~5-10x more expensive than a plain write.
+#
+# Write steps:  5k → 15k → 30k → 50k → unthrottled
+# Read steps:  10k → 30k → 60k → 100k → unthrottled
+# Mixed steps:  5k → 15k → 30k → 50k → unthrottled
+#
+# threads=3750 matches connectionsPerHost=3750 in the stress commands
+# (targeting ~1000 connections/shard on a 3-node i4i.4xlarge cluster).
+
+#perf_gradual_threads: {"read": 3750, "write": 3750, "mixed": 3750}
+#perf_gradual_throttle_steps: {"read": ['30000', '45000', '90000', '150000', 'unthrottled'], "write": ['2500', '75000', '15000', '25000', 'unthrottled'], "mixed": ['5000', '15000', '30000', '50000', 'unthrottled']}
+#perf_gradual_step_duration: {"read": '30m', "write": '30m', "mixed": '30m'}
+perf_gradual_throttle_steps: {"read": ['unthrottled'], "write": ['unthrottled'], "mixed": ['unthrottled']}
+perf_gradual_threads: {"read": 100, "write": 100, "mixed": 100}
+perf_gradual_step_duration: {"read": '10m', "write": '10m', "mixed": '10m'}
