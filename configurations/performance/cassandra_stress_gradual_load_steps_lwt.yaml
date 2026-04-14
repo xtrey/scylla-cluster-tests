@@ -1,0 +1,21 @@
+# LWT gradual load steps configuration
+#
+# Used by both light and heavy LWT predefined-steps tests.
+# Throttle values are much lower than regular ops because LWT (Paxos/TWL)
+# is ~5-10x more expensive than a plain write.
+#
+# threads=468 targets ~117 threads/vCPU on c7i.xlarge loaders (4 vCPU each).
+# Calculation: 117 t/vCPU × 4 vCPU = 468 threads per loader.
+#
+# Light test  (i4i.2xlarge, 7 shards, 7 loaders):
+#   connectionsPerHost=1000 × 7 loaders ÷ 7 shards = 1000 conns/shard
+#   Throttle steps calibrated for ~50% of i4i.4xlarge throughput ceiling.
+#
+# Heavy test  (i3en.2xlarge, 8 shards, 8 loaders):
+#   connectionsPerHost=1000 × 8 loaders ÷ 8 shards = 1000 conns/shard
+#   Throttle steps TBD after first calibration run.
+
+perf_gradual_threads: {"read": 468, "write": 468, "mixed": 468}
+#perf_gradual_throttle_steps: {"read": ['80000', '160000', 'unthrottled'], "write": ['7500', '15000', 'unthrottled'], "mixed": ['15000', '30000', 'unthrottled']}
+perf_gradual_throttle_steps: {"read": ['unthrottled'], "write": ['unthrottled'], "mixed": ['unthrottled']}
+perf_gradual_step_duration: {"read": '30m', "write": '30m', "mixed": '30m'}
