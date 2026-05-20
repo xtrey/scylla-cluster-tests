@@ -1,0 +1,65 @@
+# SCYLLADB-2122: Reproduce paxos table growth with LWT UPDATE IF EXISTS
+#
+# Customer scenario (Solitics cluster 44881):
+#   - Heavy LWT operations on existing keys
+#   - SELECT at SERIAL consistency to check data presence
+#   - Partition-key-only table, wide rows (~500 bytes)
+#   - $paxos table grows ~5x larger than user table
+#
+# Strategy:
+#   1. Preload 1M rows with INSERT IF NOT EXISTS (fixes user table size)
+#   2. stress_cmd: UPDATE ... IF EXISTS on pre-loaded keys — every update succeeds,
+#      creating new paxos proposals while user table stays same size
+#   3. stress_read_cmd: SERIAL reads add more paxos state
+#
+# Cluster: 3 nodes, 1 DC, tablets enabled
+# Duration: 30 minutes of stress (40 min total with prepare + margin)
+# Goal: Observe paxos:user-table size ratio reaching ~5:1 and latency degradation
+#
+# To evaluate paxos_grace_seconds impact, run with different values of:
+#   append_scylla_yaml.paxos_grace_seconds (default is 864000 = 10 days)
+
+test_duration: 40
+
+# Preload 1M rows with INSERT IF NOT EXISTS — this sets the fixed user table size
+prepare_write_cmd: [
+    "cassandra-stress user profile=/tmp/cs_paxos_growth_lwt.yaml 'ops(write_insert-if-not-exists=1)' no-warmup cl=QUORUM serial-cl=LOCAL_SERIAL n=500000 -mode native cql3 -rate threads=200 -pop seq=1..500000",
+    "cassandra-stress user profile=/tmp/cs_paxos_growth_lwt.yaml 'ops(write_insert-if-not-exists=1)' no-warmup cl=QUORUM serial-cl=LOCAL_SERIAL n=500000 -mode native cql3 -rate threads=200 -pop seq=500001..1000000"
+]
+
+# Heavy LWT updates on pre-loaded keys — UPDATE IF EXISTS always succeeds
+# Each successful update creates a full paxos proposal (~500 bytes) while
+# user table stays same size (just overwrites current row values)
+stress_cmd: [
+    "cassandra-stress user profile=/tmp/cs_paxos_growth_lwt.yaml 'ops(write_update-if-exists=1)' no-warmup cl=QUORUM serial-cl=LOCAL_SERIAL duration=30m -mode native cql3 -rate threads=200 -pop seq=1..1000000",
+    "cassandra-stress user profile=/tmp/cs_paxos_growth_lwt.yaml 'ops(write_update-if-exists=1)' no-warmup cl=QUORUM serial-cl=LOCAL_SERIAL duration=30m -mode native cql3 -rate threads=200 -pop seq=1..1000000",
+    "cassandra-stress user profile=/tmp/cs_paxos_growth_lwt.yaml 'ops(write_update-if-exists=1)' no-warmup cl=QUORUM serial-cl=LOCAL_SERIAL duration=30m -mode native cql3 -rate threads=200 -pop seq=1..1000000"
+]
+
+# Concurrent SERIAL reads — simulates customer's serial consistency checks
+stress_read_cmd: [
+    "cassandra-stress user profile=/tmp/cs_paxos_growth_lwt.yaml 'ops(read_serial-select=1)' cl=SERIAL duration=30m -mode native cql3 -rate threads=200 -pop seq=1..1000000",
+    "cassandra-stress user profile=/tmp/cs_paxos_growth_lwt.yaml 'ops(read_serial-select=1)' cl=SERIAL duration=30m -mode native cql3 -rate threads=200 -pop seq=1..1000000",
+    "cassandra-stress user profile=/tmp/cs_paxos_growth_lwt.yaml 'ops(read_serial-select=1)' cl=SERIAL duration=30m -mode native cql3 -rate threads=200 -pop seq=1..1000000"
+]
+
+n_db_nodes: 3
+n_loaders: 3
+round_robin: true
+
+instance_type_db: 'i3en.2xlarge'
+instance_type_loader: 'c7i.xlarge'
+instance_type_monitor: 't3.large'
+
+nemesis_class_name: 'NoOpMonkey'
+nemesis_during_prepare: false
+
+user_prefix: 'longevity-lwt-paxos-growth'
+
+use_preinstalled_scylla: true
+use_mgmt: false
+backtrace_decoding: true
+
+append_scylla_args: '--blocked-reactor-notify-ms 5 --abort-on-lsa-bad-alloc 1 --abort-on-seastar-bad-alloc --abort-on-internal-error 1 --abort-on-ebadf 1'
+append_scylla_yaml:
+  auto_snapshot: false

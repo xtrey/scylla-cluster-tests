@@ -1,0 +1,87 @@
+# Cassandra-stress profile to reproduce SCYLLADB-2122:
+# Paxos table growth with heavy UPDATE IF EXISTS on pre-loaded data
+#
+# Customer scenario (Solitics cluster 44881):
+#   - Heavy LWT operations on existing keys
+#   - SELECT at SERIAL consistency to verify data presence
+#   - Partition-key-only table (no clustering columns)
+#   - $paxos table grows ~5x larger than user table
+#
+# Strategy:
+#   1. Preload data with INSERT IF NOT EXISTS (user table gets fixed size)
+#   2. Run UPDATE ... IF EXISTS repeatedly on same keys — every update succeeds,
+#      creating a new paxos proposal entry (stores full row ~500 bytes) while
+#      user table stays the same size (just overwrites current values)
+#   3. Concurrent SERIAL reads add more paxos state
+#
+# Wide rows (~500 bytes) amplify paxos entry size since each proposal stores full row.
+
+keyspace: ks_paxos_growth
+
+keyspace_definition: |
+  CREATE KEYSPACE ks_paxos_growth WITH replication = {'class': 'NetworkTopologyStrategy', 'replication_factor': 3};
+
+table: unique_key_value
+
+table_definition: |
+  CREATE TABLE unique_key_value (
+        unique_key    text,
+        unique_value  text,
+        context       text,
+        creation_date timestamp,
+        aux1          text,
+        aux2          int,
+        aux3          bigint,
+        aux4          double,
+        aux5          text,
+        aux6          text,
+        PRIMARY KEY ((unique_key, unique_value, context))
+  ) WITH compaction = { 'class':'SizeTieredCompactionStrategy' }
+    AND comment='SCYLLADB-2122: paxos table growth reproduction'
+
+columnspec:
+  - name: unique_key
+    size: uniform(10..50)
+    population: uniform(1..10000000)
+  - name: unique_value
+    size: uniform(10..50)
+    population: uniform(1..10000000)
+  - name: context
+    size: uniform(5..20)
+    population: uniform(1..1000)
+  - name: creation_date
+    population: uniform(1..10000000)
+  - name: aux1
+    size: uniform(20..100)
+    population: uniform(1..10000000)
+  - name: aux2
+    size: uniform(1..1000)
+    population: uniform(1..1000000)
+  - name: aux3
+    size: uniform(1..1000)
+    population: uniform(1..1000000)
+  - name: aux4
+    size: uniform(1..1000)
+    population: uniform(1..1000000)
+  - name: aux5
+    size: uniform(20..100)
+    population: uniform(1..10000000)
+  - name: aux6
+    size: uniform(20..100)
+    population: uniform(1..10000000)
+
+insert:
+  partitions: fixed(1)
+  select: fixed(1)/10000000
+  batchtype: UNLOGGED
+
+queries:
+   write_insert-if-not-exists:
+      cql: INSERT INTO unique_key_value (unique_key, unique_value, context, creation_date, aux1, aux2, aux3, aux4, aux5, aux6) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) IF NOT EXISTS
+      fields: samerow
+   write_update-if-exists:
+      cql: UPDATE unique_key_value SET creation_date = ?, aux1 = ?, aux2 = ?, aux3 = ?, aux4 = ?, aux5 = ?, aux6 = ? WHERE unique_key = ? AND unique_value = ? AND context = ? IF EXISTS
+      fields: samerow
+   read_serial-select:
+      cql: SELECT * FROM unique_key_value WHERE unique_key = ? AND unique_value = ? AND context = ?
+      fields: samerow
