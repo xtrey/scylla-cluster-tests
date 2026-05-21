@@ -1,87 +1,115 @@
 # Cassandra-stress profile to reproduce SCYLLADB-2122:
-# Paxos table growth with heavy UPDATE IF EXISTS on pre-loaded data
+# Paxos ($paxos) table grows much larger than the base table under LWT load.
 #
 # Customer scenario (Solitics cluster 44881):
-#   - Heavy LWT operations on existing keys
-#   - SELECT at SERIAL consistency to verify data presence
-#   - Partition-key-only table (no clustering columns)
-#   - $paxos table grows ~5x larger than user table
+#   - INSERT IF NOT EXISTS for idempotency enforcement (Java driver 4.19)
+#   - Wide partitions: (brand, subscriber_id) with events per partition
+#   - Each event has unique (creation_date, unique_key) clustering key
+#   - $paxos table grows to 645 GB vs 226 GB user table (2.85:1 ratio)
+#   - paxos_grace_seconds = 864000 (10 days) — paxos entries persist as LIVE data
+#   - tombstone_gc = repair mode — dead rows only removed by repair (which we don't run)
 #
-# Strategy:
-#   1. Preload data with INSERT IF NOT EXISTS (user table gets fixed size)
-#   2. Run UPDATE ... IF EXISTS repeatedly on same keys — every update succeeds,
-#      creating a new paxos proposal entry (stores full row ~500 bytes) while
-#      user table stays the same size (just overwrites current values)
-#   3. Concurrent SERIAL reads add more paxos state
+# Schema matches customer's exact PRIMARY KEY structure:
+#   PRIMARY KEY ((brand, subscriber_id), creation_date, unique_key)
 #
-# Wide rows (~500 bytes) amplify paxos entry size since each proposal stores full row.
+# MECHANISM (per Petr Gusev, SCYLLADB-2122 comment 64802):
+#   To grow $paxos far beyond the base table you must:
+#     1. LWT-write a large number of UNIQUE primary keys (INSERT IF NOT EXISTS).
+#        Each successful CAS leaves a paxos_state entry for that key, retained for
+#        paxos_grace_seconds (10 days) regardless of what happens to the base row.
+#     2. DELETE those rows with a REGULAR (non-LWT) DELETE. This empties the base
+#        table but does NOT touch the colocated $paxos entries.
+#   Result: base table ~empty, $paxos retains every key -> ratio >> 1:1.
+#
+#   Earlier "failed-CAS" attempts (Runs 17-21) were the WRONG mechanism: both
+#   successful and failed CAS get pruned/compacted at 1h scale, so $paxos stayed
+#   flat (Run 21 peaked at only 0.79:1). The asymmetry comes from LWT-write +
+#   plain-DELETE, not from failed CAS.
+#
+# TTL / time relationship (the lever that makes a short run diverge):
+#   base default_time_to_live (300s)  <  test duration (~1h)  <<  paxos_grace_seconds (10d)
+#   The base rows expire within the run (and a post-DELETE repair + major compaction
+#   purges them from disk, since tombstone_gc=repair needs a repair to collect), while
+#   $paxos keeps every entry for 10 days. So the on-disk paxos:base ratio climbs > 1:1.
+#
+# Population sizing (forces UNIQUE keys, not collisions):
+#   The stress command drives a large, mostly-unique partition-key space via
+#   -pop seq=1..N (seed-deterministic). subscriber_id population is wide (1..50M) so
+#   each seed maps to a distinct subscriber -> ~N distinct partitions. Unlike the old
+#   bounded 10K trick, here every INSERT IF NOT EXISTS targets a fresh key -> CAS
+#   SUCCEEDS -> a new paxos entry is created. The plain DELETE then removes the base
+#   row while the paxos entry survives.
+#
+# HISTORY:
+#   - Run 17: uniform(700000..800000) -> FAILED: "Key size too large: 792973 > 65535"
+#   - Run 18: uniform(50000..64000)   -> ratio inverted (0.03:1), large keys inflate user
+#   - Run 19-20: seq(1..500M)         -> CAS always succeeds but no DELETE -> ratio ~1:1
+#   - Run 21: bounded 10K + failed CAS -> WRONG mechanism, paxos flat (0.79:1 peak)
+#   - Run 22+: LWT write unique keys + plain DELETE + base TTL<runtime + repair -> >1:1
 
 keyspace: ks_paxos_growth
 
 keyspace_definition: |
   CREATE KEYSPACE ks_paxos_growth WITH replication = {'class': 'NetworkTopologyStrategy', 'replication_factor': 3};
 
-table: unique_key_value
+table: event_history
 
 table_definition: |
-  CREATE TABLE unique_key_value (
-        unique_key    text,
-        unique_value  text,
-        context       text,
+  CREATE TABLE event_history (
+        brand text,
+        subscriber_id text,
         creation_date timestamp,
-        aux1          text,
-        aux2          int,
-        aux3          bigint,
-        aux4          double,
-        aux5          text,
-        aux6          text,
-        PRIMARY KEY ((unique_key, unique_value, context))
-  ) WITH compaction = { 'class':'SizeTieredCompactionStrategy' }
-    AND comment='SCYLLADB-2122: paxos table growth reproduction'
+        unique_key text,
+        event_type text,
+        event_name text,
+        username text,
+        PRIMARY KEY ((brand, subscriber_id), creation_date, unique_key)
+  ) WITH CLUSTERING ORDER BY (creation_date DESC, unique_key DESC)
+    AND bloom_filter_fp_chance = 0.01
+    AND caching = {'keys': 'ALL', 'rows_per_partition': 'ALL'}
+    AND compaction = {'class': 'IncrementalCompactionStrategy'}
+    AND compression = {'sstable_compression': 'LZ4Compressor'}
+    AND default_time_to_live = 300
+    AND gc_grace_seconds = 300
+    AND max_index_interval = 2048
+    AND memtable_flush_period_in_ms = 0
+    AND min_index_interval = 128
+    AND speculative_retry = '99.0PERCENTILE'
+    AND paxos_grace_seconds = 300
+    AND tombstone_gc = {'mode': 'immediate'}
+    AND comment = 'SCYLLADB-2122: paxos table growth reproduction - customer schema'
 
 columnspec:
-  - name: unique_key
-    size: uniform(10..50)
-    population: uniform(1..10000000)
-  - name: unique_value
-    size: uniform(10..50)
-    population: uniform(1..10000000)
-  - name: context
-    size: uniform(5..20)
-    population: uniform(1..1000)
+  - name: brand
+    size: uniform(5..15)
+    population: uniform(1..2)
+  - name: subscriber_id
+    size: uniform(10..30)
+    population: uniform(1..50000000)
   - name: creation_date
-    population: uniform(1..10000000)
-  - name: aux1
-    size: uniform(20..100)
-    population: uniform(1..10000000)
-  - name: aux2
-    size: uniform(1..1000)
-    population: uniform(1..1000000)
-  - name: aux3
-    size: uniform(1..1000)
-    population: uniform(1..1000000)
-  - name: aux4
-    size: uniform(1..1000)
-    population: uniform(1..1000000)
-  - name: aux5
-    size: uniform(20..100)
-    population: uniform(1..10000000)
-  - name: aux6
-    size: uniform(20..100)
-    population: uniform(1..10000000)
+    population: uniform(1..10)
+  - name: unique_key
+    size: uniform(100..200)
+    population: uniform(1..100)
+  - name: event_type
+    size: uniform(5..20)
+  - name: event_name
+    size: uniform(10..50)
+  - name: username
+    size: uniform(5..30)
 
 insert:
   partitions: fixed(1)
-  select: fixed(1)/10000000
+  select: fixed(1)/10000
   batchtype: UNLOGGED
 
 queries:
    write_insert-if-not-exists:
-      cql: INSERT INTO unique_key_value (unique_key, unique_value, context, creation_date, aux1, aux2, aux3, aux4, aux5, aux6) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) IF NOT EXISTS
+      cql: INSERT INTO event_history (brand, subscriber_id, creation_date, unique_key, event_type, event_name, username) VALUES (?, ?, ?, ?, ?, ?, ?) IF NOT EXISTS
       fields: samerow
-   write_update-if-exists:
-      cql: UPDATE unique_key_value SET creation_date = ?, aux1 = ?, aux2 = ?, aux3 = ?, aux4 = ?, aux5 = ?, aux6 = ? WHERE unique_key = ? AND unique_value = ? AND context = ? IF EXISTS
+   delete_plain:
+      cql: DELETE FROM event_history WHERE brand = ? AND subscriber_id = ? AND creation_date = ? AND unique_key = ?
       fields: samerow
    read_serial-select:
-      cql: SELECT * FROM unique_key_value WHERE unique_key = ? AND unique_value = ? AND context = ?
+      cql: SELECT * FROM event_history WHERE brand = ? AND subscriber_id = ? AND creation_date = ? AND unique_key = ?
       fields: samerow

@@ -1,4 +1,6 @@
-# SCYLLADB-2122: Paxos table growth reproduction (TABLETS)
+# SCYLLADB-2122: Paxos table growth reproduction (VNODES)
+#
+# Same as tablets variant but with tablets disabled (vnodes) for comparison.
 #
 # Customer scenario (Solitics cluster 44881):
 #   - INSERT IF NOT EXISTS for idempotency
@@ -17,20 +19,14 @@
 #
 # TTL lever (makes a 1h run diverge):
 #   base default_time_to_live (300s) < test duration (~1h) << paxos_grace_seconds (10d)
-#   Base rows expire during the run. A post-DELETE repair (tombstone_gc=repair needs
-#   repair to allow compaction) + major compaction purges them from disk, while $paxos
-#   keeps every entry for 10 days.
 #
 # Test logic (test_paxos_growth):
 #   - Phase 1 (populate ~10m): INSERT IF NOT EXISTS over a large UNIQUE key space
-#     -> CAS succeeds -> $paxos fills with one entry per key.
-#   - Phase 2 (delete ~10m): REGULAR (non-LWT) DELETE over the same key range ->
-#     base rows tombstoned, $paxos entries persist.
-#   - Phase 3 (reclaim): wait past base TTL (300s) + propagation_delay (60s), run
-#     nodetool repair + major compaction -> base empties on disk -> ratio > 1:1.
+#   - Phase 2 (delete ~10m): REGULAR (non-LWT) DELETE over the same key range
+#   - Phase 3 (reclaim): wait past base TTL, repair + major compaction -> ratio > 1:1
 #
-# Cluster: 3 nodes, 1 DC, tablets enabled (default)
-# Duration: ~100 min total (10m populate + 10m delete + 6m TTL wait + repair + compact)
+# Cluster: 3 nodes, 1 DC, vnodes (tablets disabled)
+# Duration: ~100 min total
 # Success criterion: on-disk paxos:user ratio > 1:1 after reclaim.
 
 test_duration: 100
@@ -64,7 +60,7 @@ instance_provision: 'on_demand'
 nemesis_class_name: 'NoOpMonkey'
 nemesis_during_prepare: false
 
-user_prefix: 'lwt-paxos-tablets'
+user_prefix: 'lwt-paxos-vnodes'
 
 use_preinstalled_scylla: true
 use_mgmt: false
@@ -74,3 +70,5 @@ append_scylla_args: '--blocked-reactor-notify-ms 500 --abort-on-lsa-bad-alloc 1 
 append_scylla_yaml:
   auto_snapshot: false
   rf_rack_valid_keyspaces: false
+  enable_tablets: false
+  tablets_mode_for_new_keyspaces: 'disabled'

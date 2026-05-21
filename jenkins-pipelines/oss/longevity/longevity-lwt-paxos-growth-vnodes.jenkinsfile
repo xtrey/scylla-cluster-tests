@@ -7,5 +7,5 @@ longevityPipeline(
     backend: 'aws',
     region: 'eu-west-1',
     test_name: 'longevity_lwt_paxos_growth_test.LWTPaxosGrowthTest.test_paxos_growth',
-    test_config: 'test-cases/longevity/longevity-lwt-paxos-growth-tablets.yaml'
+    test_config: 'test-cases/longevity/longevity-lwt-paxos-growth-vnodes.yaml'
 )
