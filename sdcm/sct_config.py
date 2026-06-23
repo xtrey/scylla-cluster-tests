@@ -3786,6 +3786,23 @@ class SCTConfiguration(BaseModel):
                                 f"perf_gradual_throttle_steps for {workload} step {step_idx}: "
                                 f"'rate' must be a string, got {type(step['rate']).__name__}"
                             )
+
+                    # Validate duration if present
+                    if "duration" in step:
+                        if not isinstance(step["duration"], str) or not step["duration"]:
+                            raise ValueError(
+                                f"perf_gradual_throttle_steps for {workload} step {step_idx}: "
+                                f"'duration' must be a non-empty string, got {step['duration']}"
+                            )
+
+                    # Validate per-step wait control if present
+                    if "wait_no_compactions" in step:
+                        if not isinstance(step["wait_no_compactions"], bool):
+                            raise ValueError(
+                                f"perf_gradual_throttle_steps for {workload} step {step_idx}: "
+                                f"'wait_no_compactions' must be a boolean, got "
+                                f"{type(step['wait_no_compactions']).__name__}"
+                            )
                 else:
                     raise ValueError(
                         f"perf_gradual_throttle_steps for {workload} step {step_idx}: "

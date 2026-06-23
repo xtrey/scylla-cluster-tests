@@ -404,12 +404,8 @@ class PerformanceRegressionPredefinedStepsTest(PerformanceRegressionTest):
             stress_cmd_to_run = stress_cmd
 
             # Replace placeholders from step_params dict
-            if "threads" in step_params:
-                stress_cmd_to_run = stress_cmd_to_run.replace("$threads", str(step_params["threads"]))
-            if "concurrency" in step_params:
-                stress_cmd_to_run = stress_cmd_to_run.replace("$concurrency", str(step_params["concurrency"]))
-            if "throttle" in step_params:
-                stress_cmd_to_run = stress_cmd_to_run.replace("$throttle", step_params["throttle"])
+            for param_name, param_value in sorted(step_params.items(), key=lambda item: len(item[0]), reverse=True):
+                stress_cmd_to_run = stress_cmd_to_run.replace(f"${param_name}", str(param_value))
             if step_duration is not None:
                 # For latte, --duration accepts an integer iteration count (number of cycles to run)
                 # rather than a time string like cassandra-stress
@@ -523,6 +519,14 @@ class PerformanceRegressionPredefinedStepsTest(PerformanceRegressionTest):
 
         return current_throttle
 
+    @staticmethod
+    def current_step_duration(throttle_step_dict, workload: Workload):
+        return throttle_step_dict.get("duration", workload.step_duration)
+
+    @staticmethod
+    def should_wait_no_compactions(throttle_step_dict, workload: Workload):
+        return throttle_step_dict.get("wait_no_compactions", workload.wait_no_compactions)
+
     # pylint: disable=too-many-arguments,too-many-locals
     def run_gradual_increase_load(self, workload: Workload, stress_num, num_loaders, test_name):  # noqa: PLR0914
         workload = self.update_num_threads_for_steps(workload=workload)
@@ -559,12 +563,14 @@ class PerformanceRegressionPredefinedStepsTest(PerformanceRegressionTest):
             step_params["throttle"] = self.current_throttle(
                 throttle_step_dict, num_loaders, stress_num, workload.cs_cmd_tmpl[0]
             )
+            step_duration = self.current_step_duration(throttle_step_dict, workload)
 
             self.log.info(
-                "Run cs command with rate: %s Kops; threads: %s; step name: %s",
+                "Run cs command with rate: %s Kops; threads: %s; step name: %s; duration: %s",
                 throttle_step_dict.get("rate", "unthrottled"),
                 step_params["threads"],
                 current_throttle_step,
+                step_duration,
             )
             run_step = (
                 latency_calculator_decorator(
@@ -574,7 +580,7 @@ class PerformanceRegressionPredefinedStepsTest(PerformanceRegressionTest):
             results, _ = run_step(
                 stress_cmds=workload.cs_cmd_tmpl,
                 step_params=step_params,
-                step_duration=workload.step_duration,
+                step_duration=step_duration,
             )
             self.log.debug("All c-s commands results collected and saved in Argus")
 
@@ -587,7 +593,7 @@ class PerformanceRegressionPredefinedStepsTest(PerformanceRegressionTest):
             # We want 3 minutes (180 sec) wait between steps.
             # In case of "mixed" workflow - wait for compactions finished.
             # In case of "read" workflow -  it just will wait for 3 minutes
-            if workload.wait_no_compactions:
+            if self.should_wait_no_compactions(throttle_step_dict, workload):
                 if (wait_time := self.wait_no_compactions_running()[0]) < 180:
                     time.sleep(180 - wait_time)
                 self.log.info("All compactions are finished")
