@@ -5,7 +5,7 @@
 
 perf_gradual_throttle_steps:
   mixed:
-    - {threads: 12, concurrency: 128, rate: '600000'}
+    - {threads: 32, concurrency: 48, rate: '600000'}
 
 perf_gradual_step_duration: {"mixed": '60m'}
 
@@ -17,13 +17,13 @@ prepare_stress_cmd: >-
   -P speculative_retry="\"NONE\"" -P replication_factor=2
   data_dir/latte/latte_cs_alike.rn
 
-# Populate 500M rows with uniform distribution
+# Populate 300M rows with uniform distribution
 prepare_write_cmd:
   - >-
-    latte run --function write --consistency ALL --duration 500000000
-    --threads 32 --concurrency 32 --rate 93750
-    --start-cycle 1 --end-cycle 500000000
-    -P row_count=500000000 -P offset=0
+    latte run --function write --consistency ALL --duration 350000000
+    --threads 32 --concurrency 32 --rate 250000
+    --start-cycle 1 --end-cycle 350000000
+    -P row_count=350000000 -P offset=0
     -P column_count=10 -P column_size=200 -P key_size=48
     data_dir/latte/latte_cs_alike.rn
 
@@ -32,8 +32,8 @@ stress_cmd_m:
   - >-
     latte run --function write:30,read:70 --consistency QUORUM --duration $duration
     --threads $threads --concurrency $concurrency $throttle
-    --start-cycle 1 --end-cycle 500000000
-    -P row_count=500000000 -P offset=0
+    --start-cycle 1 --end-cycle 350000000
+    -P row_count=350000000 -P offset=0
     -P column_count=10 -P column_size=200 -P key_size=48
     data_dir/latte/latte_cs_alike.rn
 
@@ -46,7 +46,10 @@ latte_schema_parameters:
   key_size: 48
   speculative_retry: 'NONE'
   storage_engine: 'logstor'
-  min_per_shard_tablet_count: 32
+  min_per_shard_tablet_count: 64
 
 perf_stress_keyspace: keyspace1
 perf_stress_table: standard1
+
+# Disable rack-aware loader so latte commands are not pinned to a rack (no --rack flag)
+rack_aware_loader: false
