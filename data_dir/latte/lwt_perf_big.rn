@@ -1,0 +1,98 @@
+use latte::*;
+
+const REPLICATION_FACTOR = latte::param!("replication_factor", 3);
+const KEYSPACE = latte::param!("keyspace", "ks");
+const TABLE = latte::param!("table", "targettable");
+const ROW_COUNT = latte::param!("row_count", 120_000_000);
+
+const P_STMT_INSERT = "lwt_big_insert";
+const P_STMT_READ_SELECT = "lwt_big_read_select";
+const P_STMT_WRITE_LWT_UPDATE_IF_COND = "lwt_big_write_lwt_update_if_cond";
+
+pub async fn schema(db) {
+    db.execute(`CREATE KEYSPACE IF NOT EXISTS ${KEYSPACE}
+        WITH REPLICATION = { 'class': 'NetworkTopologyStrategy', 'replication_factor': ${REPLICATION_FACTOR} }
+        AND durable_writes = true
+    `).await?;
+
+    db.execute(`CREATE TABLE IF NOT EXISTS ${KEYSPACE}.${TABLE} (
+        pr1 timeuuid,
+        cl1 text,
+        aux1 timeuuid,
+        aux2 int,
+        aux3 smallint,
+        aux4 bigint,
+        aux5 double,
+        aux6 float,
+        aux7 tinyint,
+        aux8 decimal,
+        aux9 text,
+        PRIMARY KEY(pr1, cl1)
+    ) WITH compaction = { 'class':'SizeTieredCompactionStrategy' }
+      AND comment='A test table for lwt_perf_big latte'
+    `).await?;
+}
+
+pub async fn prepare(db) {
+    println!("debug: Keyspace: {keyspace}", keyspace=KEYSPACE);
+
+    db.prepare(
+        P_STMT_INSERT,
+        `INSERT INTO ${KEYSPACE}.${TABLE}(pr1, cl1, aux1, aux2, aux3, aux4, aux5, aux6, aux7, aux8, aux9)` +
+        ` VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).await?;
+    db.prepare(P_STMT_READ_SELECT, `SELECT pr1, cl1, aux1, aux2, aux3, aux4, aux5, aux6, aux7, aux8, aux9 FROM ${KEYSPACE}.${TABLE} WHERE pr1 = ? AND cl1 = ?`).await?;
+    db.prepare(
+        P_STMT_WRITE_LWT_UPDATE_IF_COND,
+        `UPDATE ${KEYSPACE}.${TABLE}` +
+        ` SET aux1 = ?, aux2 = ?, aux3 = ?, aux4 = ?, aux5 = ?, aux6 = ?, aux7 = ?, aux8 = ?, aux9 = ?` +
+        ` WHERE pr1 = ? AND cl1 = ?` +
+        ` IF aux1 = ? AND aux2 = ? AND aux3 = ? AND aux4 = ? AND aux5 = ? AND aux6 = ? AND aux7 = ? AND aux8 = ? AND aux9 = ?`
+    ).await?;
+}
+
+async fn row_idx(i) {
+    i % ROW_COUNT + 1
+}
+
+async fn row_data(i) {
+    let idx = row_idx(i).await;
+    #{
+        "pr1": `474ecf7${idx % 7}-4fea-11ef-${idx % 6}eba-${idx % 8}${idx % 9}1023456789`,
+        "cl1": text(idx, 32),
+        "aux1": `574ecf7${idx % 7}-4fea-11ef-${idx % 6}eba-${idx % 8}${idx % 9}1023456789`,
+        "aux2": hash_range(idx, 1_000_000),
+        "aux3": hash_range(idx, 32_767),
+        "aux4": hash(idx),
+        "aux5": normal(idx, 0.0, 1000000.0),
+        "aux6": normal_f32(idx, 0.0, 10000.0),
+        "aux7": hash_range(idx, 127),
+        "aux8": `${idx % 1000000}.${idx % 1000}`,
+        "aux9": text(idx + 1000, 32),
+    }
+}
+
+pub async fn write_insert(db, i) {
+    let data = row_data(i).await;
+    db.execute_prepared(
+        P_STMT_INSERT,
+        [data.pr1, data.cl1, data.aux1, data.aux2, data.aux3, data.aux4, data.aux5, data.aux6, data.aux7, data.aux8, data.aux9],
+    ).await?
+}
+
+pub async fn write_lwt_update_if_cond(db, i) {
+    let data = row_data(i).await;
+    db.execute_prepared(
+        P_STMT_WRITE_LWT_UPDATE_IF_COND,
+        [
+            data.aux1, data.aux2, data.aux3, data.aux4, data.aux5, data.aux6, data.aux7, data.aux8, data.aux9,
+            data.pr1, data.cl1,
+            data.aux1, data.aux2, data.aux3, data.aux4, data.aux5, data.aux6, data.aux7, data.aux8, data.aux9,
+        ],
+    ).await?
+}
+
+pub async fn read_select(db, i) {
+    let data = row_data(i).await;
+    db.execute_prepared(P_STMT_READ_SELECT, [data.pr1, data.cl1]).await?
+}

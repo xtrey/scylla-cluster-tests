@@ -1,0 +1,77 @@
+use latte::*;
+
+const REPLICATION_FACTOR = latte::param!("replication_factor", 3);
+const KEYSPACE = latte::param!("keyspace", "ks");
+const TABLE = latte::param!("table", "targettable");
+const ROW_COUNT = latte::param!("row_count", 120_000_000);
+
+const P_STMT_INSERT = "lwt_small_insert";
+const P_STMT_READ_SELECT = "lwt_small_read_select";
+const P_STMT_WRITE_LWT_INSERT_IF_NOT_EXISTS = "lwt_small_write_lwt_insert_if_not_exists";
+
+pub async fn schema(db) {
+    db.execute(`CREATE KEYSPACE IF NOT EXISTS ${KEYSPACE}
+        WITH REPLICATION = { 'class': 'NetworkTopologyStrategy', 'replication_factor': ${REPLICATION_FACTOR} }
+        AND durable_writes = true
+    `).await?;
+
+    db.execute(`CREATE TABLE IF NOT EXISTS ${KEYSPACE}.${TABLE} (
+        pr1 timeuuid,
+        aux1 int,
+        aux2 bigint,
+        aux3 double,
+        aux4 float,
+        aux5 tinyint,
+        PRIMARY KEY(pr1)
+    ) WITH compaction = { 'class':'SizeTieredCompactionStrategy' }
+      AND comment='A test table for lwt_perf_small latte'
+    `).await?;
+}
+
+pub async fn prepare(db) {
+    println!("debug: Keyspace: {keyspace}", keyspace=KEYSPACE);
+
+    db.prepare(
+        P_STMT_INSERT,
+        `INSERT INTO ${KEYSPACE}.${TABLE}(pr1, aux1, aux2, aux3, aux4, aux5) VALUES (?, ?, ?, ?, ?, ?)`
+    ).await?;
+    db.prepare(P_STMT_READ_SELECT, `SELECT pr1, aux1, aux2, aux3, aux4, aux5 FROM ${KEYSPACE}.${TABLE} WHERE pr1 = ?`).await?;
+    db.prepare(
+        P_STMT_WRITE_LWT_INSERT_IF_NOT_EXISTS,
+        `INSERT INTO ${KEYSPACE}.${TABLE}(pr1, aux1, aux2, aux3, aux4, aux5) VALUES (?, ?, ?, ?, ?, ?) IF NOT EXISTS`
+    ).await?;
+}
+
+async fn row_idx(i) {
+    i % ROW_COUNT + 1
+}
+
+async fn row_data(i) {
+    let idx = row_idx(i).await;
+    #{
+        "pr1": `474ecf7${idx % 7}-4fea-11ef-${idx % 6}eba-${idx % 8}${idx % 9}1023456789`,
+        "aux1": hash_range(idx, 1_000),
+        "aux2": hash(idx),
+        "aux3": normal(idx, 0.0, 1000000.0),
+        "aux4": normal_f32(idx, 0.0, 10000.0),
+        "aux5": hash_range(idx, 127),
+    }
+}
+
+pub async fn write_insert(db, i) {
+    let data = row_data(i).await;
+    db.execute_prepared(P_STMT_INSERT, [data.pr1, data.aux1, data.aux2, data.aux3, data.aux4, data.aux5]).await?
+}
+
+pub async fn write_lwt_insert_if_not_exists(db, i) {
+    let data = row_data(i).await;
+    db.execute_prepared(
+        P_STMT_WRITE_LWT_INSERT_IF_NOT_EXISTS,
+        [data.pr1, data.aux1, data.aux2, data.aux3, data.aux4, data.aux5],
+    ).await?
+}
+
+pub async fn read_select(db, i) {
+    let data = row_data(i).await;
+    db.execute_prepared(P_STMT_READ_SELECT, [data.pr1]).await?
+}

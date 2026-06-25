@@ -1,0 +1,173 @@
+# LWT Light Predefined Throughput Steps test — 3-node cluster
+#
+# Workload: Light LWT operations using data_dir/latte/lwt_perf_small.rn
+#   write  (stress_cmd_w)  — INSERT ... IF NOT EXISTS  (single-PK, narrow row)
+#   read   (stress_cmd_r)  — SELECT by primary key      (non-LWT QUORUM read baseline)
+#   mixed  (stress_cmd_m)  — INSERT IF NOT EXISTS + SELECT  (50/50 mix)
+#
+# Used by:
+#   scylla-enterprise-perf-regression-predefined-throughput-steps-lwt-light-vnodes.jenkinsfile
+#   scylla-enterprise-perf-regression-predefined-throughput-steps-lwt-light-tablets.jenkinsfile
+
+test_duration: 500
+
+perf_stress_keyspace: ks
+perf_stress_table: targettable
+
+latte_schema_parameters:
+  keyspace: ks
+  table: targettable
+  replication_factor: 3
+  row_count: 120000000
+
+round_robin: true
+
+n_db_nodes: 3
+n_loaders: 7
+
+instance_type_db: 'i4i.2xlarge'
+instance_type_loader: 'c7i.xlarge'
+instance_type_monitor: 't3.large'
+use_capacity_reservation: true
+use_placement_group: true
+nemesis_add_node_cnt: 0
+
+use_preinstalled_scylla: true
+
+user_prefix: 'perf-predefined-steps-lwt-light'
+argus_email_report_template: email_report_performance.yaml
+
+backtrace_decoding: true
+backtrace_stall_decoding: false
+
+use_mgmt: false
+email_recipients: ['scylla-perf-results@scylladb.com']
+
+use_hdrhistogram: true
+
+append_scylla_args: '--blocked-reactor-notify-ms 5 --abort-on-lsa-bad-alloc 1 --abort-on-seastar-bad-alloc --abort-on-internal-error 1 --abort-on-ebadf 1'
+append_scylla_yaml:
+  auto_snapshot: false
+
+use_prepared_loaders: false
+
+adaptive_timeout_store_metrics: false
+
+stop_test_on_stress_failure: false
+
+teardown_validators:
+  test_error_events:
+    enabled: true
+
+prepare_stress_cmd: >-
+  latte schema data_dir/latte/lwt_perf_small.rn
+
+prepare_write_cmd:
+  - >-
+    latte run --function write_insert --consistency ALL --duration 30000000
+    --threads 32 --concurrency 8 --rate 50000
+    --start-cycle 1 --end-cycle 30000000
+    data_dir/latte/lwt_perf_small.rn
+  - >-
+    latte run --function write_insert --consistency ALL --duration 30000000
+    --threads 32 --concurrency 8 --rate 50000
+    --start-cycle 30000001 --end-cycle 60000000
+    data_dir/latte/lwt_perf_small.rn
+  - >-
+    latte run --function write_insert --consistency ALL --duration 30000000
+    --threads 32 --concurrency 8 --rate 50000
+    --start-cycle 60000001 --end-cycle 90000000
+    data_dir/latte/lwt_perf_small.rn
+  - >-
+    latte run --function write_insert --consistency ALL --duration 30000000
+    --threads 32 --concurrency 8 --rate 50000
+    --start-cycle 90000001 --end-cycle 120000000
+    data_dir/latte/lwt_perf_small.rn
+
+stress_cmd_w:
+  - >-
+    latte run --function write_lwt_insert_if_not_exists --consistency QUORUM --serial-consistency=LOCAL_SERIAL
+    --duration $duration --threads $threads --concurrency $concurrency $throttle
+    --start-cycle 1 --end-cycle 30000000
+    data_dir/latte/lwt_perf_small.rn
+  - >-
+    latte run --function write_lwt_insert_if_not_exists --consistency QUORUM --serial-consistency=LOCAL_SERIAL
+    --duration $duration --threads $threads --concurrency $concurrency $throttle
+    --start-cycle 30000001 --end-cycle 60000000
+    data_dir/latte/lwt_perf_small.rn
+  - >-
+    latte run --function write_lwt_insert_if_not_exists --consistency QUORUM --serial-consistency=LOCAL_SERIAL
+    --duration $duration --threads $threads --concurrency $concurrency $throttle
+    --start-cycle 60000001 --end-cycle 90000000
+    data_dir/latte/lwt_perf_small.rn
+  - >-
+    latte run --function write_lwt_insert_if_not_exists --consistency QUORUM --serial-consistency=LOCAL_SERIAL
+    --duration $duration --threads $threads --concurrency $concurrency $throttle
+    --start-cycle 90000001 --end-cycle 120000000
+    data_dir/latte/lwt_perf_small.rn
+
+stress_cmd_r:
+  - >-
+    latte run --function read_select --consistency QUORUM --duration $duration
+    --threads $threads --concurrency $concurrency $throttle
+    --start-cycle 1 --end-cycle 7500000
+    data_dir/latte/lwt_perf_small.rn
+  - >-
+    latte run --function read_select --consistency QUORUM --duration $duration
+    --threads $threads --concurrency $concurrency $throttle
+    --start-cycle 7500001 --end-cycle 15000000
+    data_dir/latte/lwt_perf_small.rn
+  - >-
+    latte run --function read_select --consistency QUORUM --duration $duration
+    --threads $threads --concurrency $concurrency $throttle
+    --start-cycle 15000001 --end-cycle 22500000
+    data_dir/latte/lwt_perf_small.rn
+  - >-
+    latte run --function read_select --consistency QUORUM --duration $duration
+    --threads $threads --concurrency $concurrency $throttle
+    --start-cycle 22500001 --end-cycle 30000000
+    data_dir/latte/lwt_perf_small.rn
+
+stress_cmd_cache_warmup:
+  - >-
+    latte run --function read_select --consistency ALL --duration 7500000
+    --threads $threads --concurrency $concurrency
+    --start-cycle 1 --end-cycle 7500000
+    data_dir/latte/lwt_perf_small.rn
+  - >-
+    latte run --function read_select --consistency ALL --duration 7500000
+    --threads $threads --concurrency $concurrency
+    --start-cycle 7500001 --end-cycle 15000000
+    data_dir/latte/lwt_perf_small.rn
+  - >-
+    latte run --function read_select --consistency ALL --duration 7500000
+    --threads $threads --concurrency $concurrency
+    --start-cycle 15000001 --end-cycle 22500000
+    data_dir/latte/lwt_perf_small.rn
+  - >-
+    latte run --function read_select --consistency ALL --duration 7500000
+    --threads $threads --concurrency $concurrency
+    --start-cycle 22500001 --end-cycle 30000000
+    data_dir/latte/lwt_perf_small.rn
+
+stress_cmd_m:
+  - >-
+    latte run --function write_lwt_insert_if_not_exists:1,read_select:1 --consistency QUORUM --serial-consistency=LOCAL_SERIAL
+    --duration $duration --threads $threads --concurrency $concurrency $throttle
+    --start-cycle 1 --end-cycle 7500000
+    data_dir/latte/lwt_perf_small.rn
+  - >-
+    latte run --function write_lwt_insert_if_not_exists:1,read_select:1 --consistency QUORUM --serial-consistency=LOCAL_SERIAL
+    --duration $duration --threads $threads --concurrency $concurrency $throttle
+    --start-cycle 7500001 --end-cycle 15000000
+    data_dir/latte/lwt_perf_small.rn
+  - >-
+    latte run --function write_lwt_insert_if_not_exists:1,read_select:1 --consistency QUORUM --serial-consistency=LOCAL_SERIAL
+    --duration $duration --threads $threads --concurrency $concurrency $throttle
+    --start-cycle 15000001 --end-cycle 22500000
+    data_dir/latte/lwt_perf_small.rn
+  - >-
+    latte run --function write_lwt_insert_if_not_exists:1,read_select:1 --consistency QUORUM --serial-consistency=LOCAL_SERIAL
+    --duration $duration --threads $threads --concurrency $concurrency $throttle
+    --start-cycle 22500001 --end-cycle 30000000
+    data_dir/latte/lwt_perf_small.rn
