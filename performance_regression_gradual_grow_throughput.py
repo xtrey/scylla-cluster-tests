@@ -8,9 +8,10 @@ from dataclasses import dataclass, replace
 from typing import List, Union
 
 from performance_regression_test import PerformanceRegressionTest
-from sdcm.utils.common import skip_optional_stage
+from sdcm.stress.latte_thread import find_latte_fn_names
 from sdcm.sct_events import Severity
 from sdcm.sct_events.system import TestFrameworkEvent
+from sdcm.utils.common import skip_optional_stage
 from sdcm.utils.decorators import latency_calculator_decorator
 from sdcm.utils.latency import calculate_latency, analyze_hdr_percentiles
 
@@ -369,6 +370,334 @@ class PerformanceRegressionPredefinedStepsTest(PerformanceRegressionTest):
 
             self.log.info("Schema has been prepared")
             self.run_post_prepare_cql(workload=workload)
+
+    # ─── Dual-engine orchestration (LSM + logstor concurrent, separate metrics) ───
+
+    def _dispatch_stress_cmds(self, stress_cmds, step_params, step_duration):
+        """Dispatch stress commands non-blocking and return the live stress queues.
+
+        Unlike run_step, this method does NOT wait for results — it only launches the
+        stress threads.  Callers must later call get_stress_results on each returned
+        queue.  Used by run_concurrent_dual_engine_step to interleave the dispatch of
+        both engines' commands before waiting on any of them.
+
+        Args:
+            stress_cmds:  List of stress command templates with $-placeholders.
+            step_params:  Dict of placeholder values (threads, rates, duration, etc.).
+            step_duration: Duration string to substitute for $duration.
+
+        Returns:
+            List of stress queue objects (one per command).
+        """
+        stress_queue = []
+        for stress_cmd in stress_cmds:
+            params = {"round_robin": True, "stats_aggregate_cmds": False}
+            stress_cmd_to_run = stress_cmd
+
+            for param_name, param_value in sorted(step_params.items(), key=lambda item: len(item[0]), reverse=True):
+                stress_cmd_to_run = stress_cmd_to_run.replace(f"${param_name}", str(param_value))
+            if step_duration is not None:
+                stress_cmd_to_run = stress_cmd_to_run.replace("$duration", step_duration)
+
+            params.update({"stress_cmd": stress_cmd_to_run})
+            self.log.debug("DISPATCHING stress cmd: %s", stress_cmd_to_run)
+            stress_queue.append(self.run_stress_thread(**params))
+        return stress_queue
+
+    def run_concurrent_dual_engine_step(self, logstor_cmds, lsm_cmds, step_params, step_duration):
+        """Dispatch logstor and LSM stress commands concurrently, then collect results.
+
+        All stress threads for both engines are launched (non-blocking) before any
+        result collection begins, ensuring the two workloads actually run in parallel
+        against the cluster during the same time window.
+
+        Returns:
+            Tuple (logstor_results, logstor_queue, lsm_results, lsm_queue) where each
+            queue carries its engine's hdr_tags for the latency_calculator_decorator.
+        """
+        # Dispatch all threads for both engines without waiting
+        logstor_queue = self._dispatch_stress_cmds(logstor_cmds, step_params, step_duration)
+        lsm_queue = self._dispatch_stress_cmds(lsm_cmds, step_params, step_duration)
+
+        # Now wait for all results
+        logstor_results = []
+        for stress in logstor_queue:
+            logstor_results.extend(self.get_stress_results(queue=stress, store_results=False))
+
+        lsm_results = []
+        for stress in lsm_queue:
+            lsm_results.extend(self.get_stress_results(queue=stress, store_results=False))
+
+        return logstor_results, logstor_queue, lsm_results, lsm_queue
+
+    def _collect_logstor_results(self, logstor_results, logstor_queue, lsm_results, lsm_queue):
+        """Return (logstor_results, logstor_queue) for the latency_calculator_decorator.
+
+        The decorator reads hdr_tags from the returned stress_queue.  This thin wrapper
+        lets us apply the decorator to the logstor engine independently of LSM.
+        """
+        return logstor_results, logstor_queue
+
+    def _collect_lsm_results(self, logstor_results, logstor_queue, lsm_results, lsm_queue):
+        """Return (lsm_results, lsm_queue) for the latency_calculator_decorator.
+
+        Mirror of _collect_logstor_results for the LSM engine.
+        """
+        return lsm_results, lsm_queue
+
+    def check_latency_during_steps_dual_engine(self, logstor_step, lsm_step):
+        """Read latency results for both engine steps and remove the results file.
+
+        Unlike check_latency_during_steps (which reads one step then deletes the file),
+        this variant reads both steps in a single pass before deleting, so neither
+        engine's results are lost.
+
+        Args:
+            logstor_step: Step name key written by the logstor latency_calculator_decorator call.
+            lsm_step:     Step name key written by the LSM latency_calculator_decorator call.
+
+        Returns:
+            Tuple of (logstor_summary_dict, lsm_summary_dict).
+        """
+        with open(self.latency_results_file, encoding="utf-8") as file:
+            latency_results = json.load(file)
+
+        def _extract(step_key):
+            if latency_results and step_key in latency_results:
+                latency_results[step_key]["step"] = step_key
+                entry = calculate_latency(latency_results[step_key])
+                # analyze_hdr_percentiles requires at least one cycle with 'hdr_summary'
+                if entry.get("cycles"):
+                    enriched = analyze_hdr_percentiles({step_key: entry})
+                else:
+                    enriched = {step_key: entry}
+                return enriched
+            return {step_key: {"step": step_key, "legend": "", "cycles": []}}
+
+        logstor_summary = _extract(logstor_step)
+        lsm_summary = _extract(lsm_step)
+        pathlib.Path(self.latency_results_file).unlink()
+        return logstor_summary, lsm_summary
+
+    def run_dual_engine_gradual_increase_load(  # noqa: PLR0914
+        self,
+        logstor_workload: Workload,
+        lsm_workload: Workload,
+        num_loaders: int,
+        test_name: str,
+    ):
+        """Run LSM and logstor workloads concurrently with separate per-engine latency reporting.
+
+        Both workloads share the same throttle-step sequence (derived from logstor_workload).
+        Within each step all four commands (logstor_write, logstor_read, lsm_write, lsm_read)
+        are dispatched non-blocking before any result collection, guaranteeing true concurrency.
+
+        Latency reporting:
+        - latency_calculator_decorator is applied to _collect_logstor_results and
+          _collect_lsm_results independently, each with its own cycle_name and workload_type.
+        - This produces two separate Argus latency rows per step:
+            "logstor_<step>" with HDR tags fn--logstor_write, fn--logstor_read
+            "lsm_<step>"     with HDR tags fn--lsm_write, fn--lsm_read
+
+        Args:
+            logstor_workload: Workload for the logstor engine (60% ops).
+            lsm_workload:     Workload for the LSM engine (40% ops).
+            num_loaders:      Number of loader nodes.
+            test_name:        Human-readable test name used in log messages.
+        """
+        logstor_workload = self.update_num_threads_for_steps(workload=logstor_workload)
+        lsm_workload = self.update_num_threads_for_steps(workload=lsm_workload)
+
+        logstor_steps = self.get_sequential_throttle_steps(logstor_workload)
+
+        total_logstor_summary = {}
+        total_lsm_summary = {}
+
+        for throttle_step_dict, num_threads, current_step in zip(
+            logstor_workload.throttle_steps, logstor_workload.num_threads, logstor_steps
+        ):
+            logstor_step_key = f"logstor_{current_step}"
+            lsm_step_key = f"lsm_{current_step}"
+
+            # Build step_params: threads + all per-engine rate placeholders from the step dict.
+            # The dual-engine commands use $logstor_write_rate, $logstor_read_rate,
+            # $lsm_write_rate, $lsm_read_rate which come directly from the throttle_step_dict.
+            # $throttle is unused by dual-engine commands; default to empty string.
+            step_params = dict(throttle_step_dict)
+            if "threads" not in step_params:
+                step_params["threads"] = num_threads
+            step_params.setdefault("throttle", "")
+
+            step_duration = self.current_step_duration(throttle_step_dict, logstor_workload)
+
+            self.log.info(
+                "Dual-engine step '%s': logstor %s/%s op/s, lsm %s/%s op/s, threads=%s, duration=%s",
+                current_step,
+                throttle_step_dict.get("logstor_write_rate", "?"),
+                throttle_step_dict.get("logstor_read_rate", "?"),
+                throttle_step_dict.get("lsm_write_rate", "?"),
+                throttle_step_dict.get("lsm_read_rate", "?"),
+                num_threads,
+                step_duration,
+            )
+
+            # Dispatch all stress threads for both engines concurrently, then collect results.
+            # run_concurrent_dual_engine_step returns separate result lists and queues per engine.
+            logstor_results, logstor_queue, lsm_results, lsm_queue = self.run_concurrent_dual_engine_step(
+                logstor_cmds=logstor_workload.cs_cmd_tmpl,
+                lsm_cmds=lsm_workload.cs_cmd_tmpl,
+                step_params=step_params,
+                step_duration=step_duration,
+            )
+
+            # Apply latency_calculator_decorator to thin collector methods that return each
+            # engine's already-collected results and queue.  The decorator reads hdr_tags
+            # from the returned queue (fn--logstor_* vs fn--lsm_*) and writes independent
+            # entries to latency_results_file keyed by logstor_step_key / lsm_step_key.
+            collect_logstor = latency_calculator_decorator(
+                legend=f"Logstor step {current_step} op/s (60%)",
+                cycle_name=logstor_step_key,
+                workload_type="mixed",
+            )(self._collect_logstor_results)
+
+            collect_lsm = latency_calculator_decorator(
+                legend=f"LSM step {current_step} op/s (40%)",
+                cycle_name=lsm_step_key,
+                workload_type="mixed",
+            )(self._collect_lsm_results)
+
+            collect_logstor(
+                logstor_results=logstor_results,
+                logstor_queue=logstor_queue,
+                lsm_results=lsm_results,
+                lsm_queue=lsm_queue,
+            )
+            collect_lsm(
+                logstor_results=logstor_results,
+                logstor_queue=logstor_queue,
+                lsm_results=lsm_results,
+                lsm_queue=lsm_queue,
+            )
+
+            self.log.debug("Dual-engine step '%s' complete; collecting latency summaries", current_step)
+
+            logstor_calc = self._calculate_average_max_latency(logstor_results) if logstor_results else {}
+            lsm_calc = self._calculate_average_max_latency(lsm_results) if lsm_results else {}
+
+            logstor_summary, lsm_summary = self.check_latency_during_steps_dual_engine(
+                logstor_step=logstor_step_key, lsm_step=lsm_step_key
+            )
+
+            if logstor_calc:
+                logstor_summary[logstor_step_key].update({"ops_rate": logstor_calc.get("op rate", 0) * num_loaders})
+            if lsm_calc:
+                lsm_summary[lsm_step_key].update({"ops_rate": lsm_calc.get("op rate", 0) * num_loaders})
+
+            total_logstor_summary.update(logstor_summary)
+            total_lsm_summary.update(lsm_summary)
+
+            # Wait for compactions between steps (applies to both engines on the same cluster)
+            if self.should_wait_no_compactions(throttle_step_dict, logstor_workload):
+                if (wait_time := self.wait_no_compactions_running()[0]) < 180:
+                    time.sleep(180 - wait_time)
+                self.log.info("All compactions finished after dual-engine step '%s'", current_step)
+                self.wait_for_no_tablets_splits()
+
+        # Save combined summary: logstor and lsm sections side by side
+        combined = {"logstor": total_logstor_summary, "lsm": total_lsm_summary}
+        self.save_total_summary_in_file(combined)
+
+    def test_dual_engine_mixed_gradual_increase_load(self):
+        """Run logstor (60%) and LSM (40%) Latte workloads concurrently with separate metrics.
+
+        Test flow:
+        1. Populate both tables (500M rows each, CL=ALL).
+        2. Wait for compactions to quiesce.
+        3. Run a series of mixed (write:30/read:70) gradual-throughput steps with:
+           - Logstor table at 60% of target ops/s (fn--logstor_write, fn--logstor_read HDR tags).
+           - LSM table at 40% of target ops/s (fn--lsm_write, fn--lsm_read HDR tags).
+        4. Report independent per-engine latency series to Argus.
+
+        Required config keys (provided by logstor_lsm_dual_60_40.yaml):
+          stress_cmd_m  — all four commands (logstor_write, logstor_read, lsm_write, lsm_read);
+                          partitioned by function-name prefix (logstor_* vs lsm_*).
+          perf_gradual_throttle_steps.dual_engine_mixed,
+          perf_gradual_step_duration.dual_engine_mixed
+        """
+        workload_type = "dual_engine_mixed"
+        num_loaders = len(self.loaders.nodes)
+        self.run_fstrim_on_all_db_nodes()
+
+        # Preload both tables before entering the measured loop.
+        if not skip_optional_stage("perf_preload_data"):
+            self.preload_data()
+            self.wait_no_compactions_running(n=400, sleep_time=120)
+            self.wait_for_no_tablets_splits()
+            self.run_fstrim_on_all_db_nodes()
+
+        throttle_steps_for_type = self.throttle_steps(workload_type)
+        step_duration = self.step_duration(workload_type)
+        num_threads = self.get_num_threads_for_workload(workload_type)
+
+        # Partition the registered stress_cmd_m list into per-engine command sets
+        # using the Latte function-name prefix as the discriminator.
+        all_stress_cmds = self.params.get("stress_cmd_m") or []
+        logstor_cmds = [c for c in all_stress_cmds if any(fn.startswith("logstor_") for fn in find_latte_fn_names(c))]
+        lsm_cmds = [c for c in all_stress_cmds if any(fn.startswith("lsm_") for fn in find_latte_fn_names(c))]
+
+        if not logstor_cmds:
+            raise ValueError(
+                "test_dual_engine_mixed_gradual_increase_load: no logstor_* commands found in "
+                "stress_cmd_m. Ensure commands using --function logstor_write / logstor_read "
+                "are present in the config."
+            )
+        if not lsm_cmds:
+            raise ValueError(
+                "test_dual_engine_mixed_gradual_increase_load: no lsm_* commands found in "
+                "stress_cmd_m. Ensure commands using --function lsm_write / lsm_read "
+                "are present in the config."
+            )
+
+        # Read latte_schema_parameters once via the single-arg SCTConfiguration.get(),
+        # then use plain dict.get(key, default) on the returned dict.
+        schema_params = self.params.get("latte_schema_parameters") or {}
+
+        logstor_workload = Workload(
+            workload_type=workload_type,
+            cs_cmd_tmpl=logstor_cmds,
+            cs_cmd_warm_up=None,
+            num_threads=num_threads,
+            throttle_steps=throttle_steps_for_type,
+            preload_data=False,
+            drop_keyspace=False,
+            wait_no_compactions=True,
+            step_duration=step_duration,
+            prepare_schema=False,
+            test_keyspace=schema_params.get("logstor_keyspace", "ks_logstor"),
+            test_table=schema_params.get("logstor_table", "t_logstor"),
+        )
+
+        lsm_workload = Workload(
+            workload_type=workload_type,
+            cs_cmd_tmpl=lsm_cmds,
+            cs_cmd_warm_up=None,
+            num_threads=num_threads,
+            throttle_steps=throttle_steps_for_type,
+            preload_data=False,
+            drop_keyspace=False,
+            wait_no_compactions=True,
+            step_duration=step_duration,
+            prepare_schema=False,
+            test_keyspace=schema_params.get("lsm_keyspace", "ks_lsm"),
+            test_table=schema_params.get("lsm_table", "t_lsm"),
+        )
+
+        self.run_dual_engine_gradual_increase_load(
+            logstor_workload=logstor_workload,
+            lsm_workload=lsm_workload,
+            num_loaders=num_loaders,
+            test_name="test_dual_engine_mixed_gradual_increase_load (logstor 60% / lsm 40%)",
+        )
 
     def check_latency_during_steps(self, step):
         with open(self.latency_results_file, encoding="utf-8") as file:

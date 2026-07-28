@@ -12,8 +12,8 @@ append_scylla_args: '++ --task-quota-ms 0.2'
 
 n_db_nodes: 4
 n_loaders: 1
-#instance_type_db: 'i4i.4xlarge'
-instance_type_db: 'i4g.4xlarge'
+instance_type_db: 'i4i.4xlarge'
+#instance_type_db: 'i4g.4xlarge'
 instance_type_loader: 'c6i.16xlarge'
 
 simulated_racks: 2
