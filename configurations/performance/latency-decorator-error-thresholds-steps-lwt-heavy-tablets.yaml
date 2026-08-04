@@ -1,0 +1,40 @@
+# LWT Heavy Tablets - predefined throughput steps: gradual-load config + latency thresholds
+
+perf_gradual_threads: {"read": 468, "write": 468, "mixed": 468}
+perf_gradual_throttle_steps: {"read": ['25206'], "write": ['22283'], "mixed": ['25324']}
+perf_gradual_step_duration: {"read": '30m', "write": '30m', "mixed": '30m'}
+
+# P99 calibrated from a single run at these new targets (worst of tablets/vnodes, +25% margin
+# for run-to-run variance). P90 is null: HDR data wasn't populated in the calibration run
+# (hdr_summary was empty), so no P90 measurement exists to calibrate against.
+latency_decorator_error_thresholds:
+  write:
+    default:
+      P90 write:
+        fixed_limit: null
+      P99 write:
+        fixed_limit: 3.61
+      Throughput write:
+        fixed_limit: 21000
+
+  read:
+    default:
+      P90 read:
+        fixed_limit: null
+      P99 read:
+        fixed_limit: 0.80
+      Throughput read:
+        fixed_limit: 24000
+
+  mixed:
+    default:
+      P90 write:
+        fixed_limit: null
+      P90 read:
+        fixed_limit: null
+      P99 write:
+        fixed_limit: 2.33
+      P99 read:
+        fixed_limit: 1.14
+      Throughput write:
+        fixed_limit: 12000
