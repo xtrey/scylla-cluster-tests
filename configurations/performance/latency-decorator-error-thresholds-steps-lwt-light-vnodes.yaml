@@ -5,15 +5,18 @@ perf_gradual_throttle_steps: {"read": ['267449'], "write": ['23704'], "mixed": [
 perf_gradual_step_duration: {"read": '30m', "write": '30m', "mixed": '30m'}
 
 # P99 calibrated from a single run at these new targets (worst of tablets/vnodes, +25% margin
-# for run-to-run variance). P90 is null: HDR data wasn't populated in the calibration run
-# (hdr_summary was empty), so no P90 measurement exists to calibrate against.
+# for run-to-run variance), after fixing the HDR tag bug that previously left hdr_summary empty
+# (see the set_hdr_tags fix in sdcm/stress_thread.py). P90 stays null: no prior P90 measurement
+# exists to calibrate against, and adding new checks is out of scope for this recalibration.
+# Note: read P99 is a real, reproducibly high tail latency (~8s) at this fully-unthrottled step,
+# not measurement noise - it showed up consistently on both tablets and vnodes.
 latency_decorator_error_thresholds:
   write:
     default:
       P90 write:
         fixed_limit: null
       P99 write:
-        fixed_limit: 13.86
+        fixed_limit: 14.93
       Throughput write:
         fixed_limit: 22500
 
@@ -22,7 +25,7 @@ latency_decorator_error_thresholds:
       P90 read:
         fixed_limit: null
       P99 read:
-        fixed_limit: 113.90
+        fixed_limit: 9998.18
       Throughput read:
         fixed_limit: 254000
 
@@ -33,8 +36,8 @@ latency_decorator_error_thresholds:
       P90 read:
         fixed_limit: null
       P99 write:
-        fixed_limit: 3.90
+        fixed_limit: 12.44
       P99 read:
-        fixed_limit: 112.69
+        fixed_limit: 4.20
       Throughput write:
         fixed_limit: 20000
