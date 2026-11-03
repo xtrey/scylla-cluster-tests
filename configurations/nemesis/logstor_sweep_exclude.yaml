@@ -49,3 +49,13 @@ nemesis_exclude_list:
   - ModifyTableSpeculativeRetryMonkey
   # Jenkins build #5, Argus run 6b7660d2-e627-45a0-b1f4-29ca1508dc88, 2026.4.0~rc1.
   - ToggleAuditNemesisSyslog  # failed: node-1 did not start after the restart (SCYLLADB-5866)
+  # Jenkins build #7, Argus run a9792a7e-36e3-482a-b87b-0d5ec61a0dfc, 2026.4.0~rc1.
+  # Ran:
+  - AddRemoveDcNemesis  # succeeded
+  - BootstrapStreamingErrorNemesis  # succeeded
+  - DecommissionMonkey  # failed: streaming into node-3 hung 3h43m, logstor out of free segments (SCYLLADB-5865, SCYLLADB-5674)
+  # Skipped: the nemesis skipped itself.
+  - ToggleAuditRulesNemesisSyslog  # requires audit to be initially disabled
+  - ToggleCDCMonkey  # CDC is not enabled on any table
+  - ToggleGcModeMonkey  # scylla-enterprise#4082
+  - ToggleTableIcsMonkey  # scylla-enterprise#4082
