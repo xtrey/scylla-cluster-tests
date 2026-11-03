@@ -59,3 +59,10 @@ nemesis_exclude_list:
   - ToggleCDCMonkey  # CDC is not enabled on any table
   - ToggleGcModeMonkey  # scylla-enterprise#4082
   - ToggleTableIcsMonkey  # scylla-enterprise#4082
+  # Jenkins build #2 (scylla-staging/xtrey/sct/logstor), Argus run 5d15887b-b92d-4b4f-a743-38e32df03a07, branch-2026.4:latest.
+  # Ran:
+  - DecommissionSeedNode  # failed: streaming target node-5 aborted on logstor writeable_segment queue assert (SCYLLADB-5865)
+  # Deferred, NOT tested yet: decommission streams into a remaining node, which crashed logstor in build #7 and build #2.
+  # Remove these from the list and run them at the end of the sweep.
+  - DecommissionStreamingErrMonkey
+  - GrowShrinkClusterNemesis
