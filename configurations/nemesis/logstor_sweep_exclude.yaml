@@ -66,3 +66,30 @@ nemesis_exclude_list:
   # Remove these from the list and run them at the end of the sweep.
   - DecommissionStreamingErrMonkey
   - GrowShrinkClusterNemesis
+  # Not run: supports_logstor = False in scylla-cluster-tests#16740.
+  # sstable file operations (logstor tables have no sstables):
+  - CorruptThenRebuildMonkey
+  - CorruptThenRepairMonkey
+  - CorruptThenScrubMonkey
+  - DisableBinaryGossipExecuteMajorCompaction
+  - EnableDisableTableEncryptionAwsKmsProviderWithRotationMonkey
+  - EnableDisableTableEncryptionAwsKmsProviderWithoutRotationMonkey
+  - LoadAndStreamMonkey
+  - MajorCompactionMonkey
+  - MgmtBackup
+  - MgmtBackupSpecificKeyspaces
+  - MgmtCorruptThenRepair
+  - MgmtRestore
+  - RefreshBigMonkey
+  - RefreshMonkey
+  - SnapshotOperations
+  - StartStopCleanupCompaction
+  - StartStopMajorCompaction
+  - StartStopScrubCompaction
+  - StartStopValidationCompaction
+  # CDC is not supported on logstor:
+  - CDCStressorMonkey
+  # disk full, logstor behaviour not defined yet (SCYLLADB-1988):
+  - EndOfQuotaNemesis
+  - EnospcAllNodesMonkey
+  - EnospcMonkey
