@@ -93,3 +93,6 @@ nemesis_exclude_list:
   - EndOfQuotaNemesis
   - EnospcAllNodesMonkey
   - EnospcMonkey
+  # Jenkins build #3 (scylla-staging/xtrey/sct/logstor), Argus run e1aa4dfb-a918-483b-af18-b09e6a04fc1c, branch-2026.4:latest.
+  # Ran:
+  - DrainerMonkey  # failed: node-3 restart after drain failed: Storage wasn't found for tablet 228 (SCYLLADB-5866)
