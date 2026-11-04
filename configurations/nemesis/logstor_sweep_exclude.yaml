@@ -66,6 +66,9 @@ nemesis_exclude_list:
   # Remove these from the list and run them at the end of the sweep.
   - DecommissionStreamingErrMonkey
   - GrowShrinkClusterNemesis
+  # Deferred, NOT tested yet: replace/removenode stream into remaining nodes, which crashed logstor in xtrey builds #4 and #7 (SCYLLADB-5865).
+  - NodeTerminateAndReplace
+  - TerminateAndRemoveNodeMonkey
   # Not run: supports_logstor = False in scylla-cluster-tests#16740.
   # sstable file operations (logstor tables have no sstables):
   - CorruptThenRebuildMonkey
@@ -99,3 +102,6 @@ nemesis_exclude_list:
   # Jenkins build #4 (scylla-staging/xtrey/sct/logstor), Argus run fdd2c881-0c8b-403b-9d4d-31d4e576ada7, branch-2026.4:latest.
   # Ran:
   - IsolateNodeWithIptableRuleNemesis  # failed: removenode streaming target node-5 aborted on logstor writeable_segment queue assert (SCYLLADB-5865)
+  # Jenkins build #7 (scylla-staging/xtrey/sct/logstor), test_id 3c83a9d0-943e-48e1-8a1a-f201be4b67c6, branch-2026.4:latest.
+  # Ran:
+  - IsolateNodeWithProcessSignalNemesis  # failed: removenode streaming target node-4 aborted on logstor writeable_segment queue assert (SCYLLADB-5865)
