@@ -96,3 +96,6 @@ nemesis_exclude_list:
   # Jenkins build #3 (scylla-staging/xtrey/sct/logstor), Argus run e1aa4dfb-a918-483b-af18-b09e6a04fc1c, branch-2026.4:latest.
   # Ran:
   - DrainerMonkey  # failed: node-3 restart after drain failed: Storage wasn't found for tablet 228 (SCYLLADB-5866)
+  # Jenkins build #4 (scylla-staging/xtrey/sct/logstor), Argus run fdd2c881-0c8b-403b-9d4d-31d4e576ada7, branch-2026.4:latest.
+  # Ran:
+  - IsolateNodeWithIptableRuleNemesis  # failed: removenode streaming target node-5 aborted on logstor writeable_segment queue assert (SCYLLADB-5865)
