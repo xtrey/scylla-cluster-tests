@@ -129,3 +129,8 @@ nemesis_exclude_list:
   - OperatorNodetoolFlushAndReshard  # k8s only
   - TerminateKubernetesHostThenDecommissionAndAddScyllaNode  # k8s only
   - TerminateKubernetesHostThenReplaceScyllaNode  # k8s only
+  # Jenkins build #10 (scylla-staging/xtrey/sct/logstor), test_id 7a6fcebc-5f1c-4e64-a, branch-2026.4:latest.
+  # Ran:
+  - AddRemoveMvNemesis  # failed: node-6 restart during MV build failed: Storage wasn't found for tablet 227 (SCYLLADB-5866)
+  # Deferred, NOT tested yet: kills scylla on the MV building coordinator, a restart that failed with SCYLLADB-5866 in xtrey builds #3, #8 and #10.
+  - KillMVBuildingCoordinator
