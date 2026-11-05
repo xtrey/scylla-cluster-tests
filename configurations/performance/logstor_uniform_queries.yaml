@@ -46,19 +46,19 @@
 perf_gradual_throttle_steps:
   mixed:
     - {threads: 64, concurrency: 48, rate: '250000', write_rate: '250000', read_rate: '100',
-       write_start_cycle: 1, read_start_cycle: 5000000000, duration: '60m', wait_no_compactions: false}
+       write_start_cycle: 1, read_start_cycle: 5000000000, duration: '5m', wait_no_compactions: false}
     - {threads: 64, concurrency: 48, rate: '600000', write_rate: '180000', read_rate: '420000',
-       write_start_cycle: 10000000001, read_start_cycle: 15000000000, duration: '60m', wait_no_compactions: false}
+       write_start_cycle: 10000000001, read_start_cycle: 15000000000, duration: '5m', wait_no_compactions: false}
     # Write-only and read-only (from disk, BYPASS CACHE) steps. They run inside the mixed sub-test
     # because the write sub-test drops the keyspace around every step, so a write step there would
     # always start on an empty pool. The command that is not measured runs at 100 ops/s, like the
     # reads of the conditioning step. Each rate is unique, because the rate names the step in Argus.
     - {threads: 64, concurrency: 48, rate: '500000', write_rate: '500000', read_rate: '100',
-       write_start_cycle: 20000000001, read_start_cycle: 25000000000, duration: '30m', wait_no_compactions: false}
+       write_start_cycle: 20000000001, read_start_cycle: 25000000000, duration: '5m', wait_no_compactions: false}
     - {threads: 64, concurrency: 48, rate: '620000', write_rate: '100', read_rate: '620000',
-       write_start_cycle: 30000000001, read_start_cycle: 35000000000, duration: '30m'}
+       write_start_cycle: 30000000001, read_start_cycle: 35000000000, duration: '5m'}
 
-perf_gradual_step_duration: {"mixed": '60m'}
+perf_gradual_step_duration: {"mixed": '5m'}
 
 # No cache warmup for uniform workload (data is uniformly distributed, no hot set)
 stress_cmd_cache_warmup: []
@@ -73,9 +73,9 @@ prepare_stress_cmd: >-
 # logstor_disk_size_in_mb in enable_logstor.yaml. Read enable_logstor.yaml before you change them.
 prepare_write_cmd:
   - >-
-    latte run --function write --consistency ALL --duration 500000000
+    latte run --function write --consistency ALL --duration 5000000
     --threads 32 --concurrency 32 --rate 250000
-    --start-cycle 1 --end-cycle 500000000
+    --start-cycle 1 --end-cycle 5000000
     -P row_count=500000000 -P offset=0
     -P column_count=10 -P column_size=200 -P key_size=48
     data_dir/latte/latte_cs_alike.rn
