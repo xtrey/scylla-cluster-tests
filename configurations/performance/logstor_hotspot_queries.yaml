@@ -54,10 +54,12 @@ perf_gradual_throttle_steps:
     # the mixed sub-test because the write sub-test drops the keyspace around every step, so a write
     # step there would always start on an empty pool. The command that is not measured runs at
     # 100 ops/s. Each rate is unique across both logstor workloads, because the rate names the step
-    # in Argus and latency-decorator-error-thresholds-steps-logstor.yaml is shared.
-    - {threads: 64, concurrency: 48, rate: '550000', write_rate: '550000', read_rate: '100',
+    # in Argus and latency-decorator-error-thresholds-steps-logstor.yaml is shared. All the steps use
+    # 32 threads, because steps with different thread counts get '_<threads>_threads' added to their
+    # names, and then the names do not match the keys of the thresholds file.
+    - {threads: 32, concurrency: 48, rate: '550000', write_rate: '550000', read_rate: '100',
        write_start_cycle: 20000000001, read_start_cycle: 25000000000, duration: '5m', wait_no_compactions: false}
-    - {threads: 64, concurrency: 48, rate: '640000', write_rate: '100', read_rate: '640000',
+    - {threads: 32, concurrency: 48, rate: '640000', write_rate: '100', read_rate: '640000',
        write_start_cycle: 30000000001, read_start_cycle: 35000000000, duration: '5m'}
 
 perf_gradual_step_duration: {"mixed": '5m'}
