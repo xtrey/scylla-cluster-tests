@@ -69,6 +69,22 @@ nemesis_exclude_list:
   # Deferred, NOT tested yet: replace/removenode stream into remaining nodes, which crashed logstor in xtrey builds #4 and #7 (SCYLLADB-5865).
   - NodeTerminateAndReplace
   - TerminateAndRemoveNodeMonkey
+  # Deferred, NOT tested yet: these restart scylla, and a plain restart failed with SCYLLADB-5866 in xtrey builds #3 and #8.
+  - ClusterRollingRestart
+  - ClusterRollingRestartRandomOrder
+  - HardRebootNodeMonkey
+  - MultipleHardRebootNodeMonkey
+  - RebuildStreamingErrMonkey
+  - RepairStreamingErrMonkey
+  - RestartThenRepairNodeMonkey
+  - RollingRestartConfigChangeInternodeCompression
+  - ScyllaKillMonkey
+  - SoftRebootNodeMonkey
+  - StopStartMonkey
+  - StopWaitStartMonkey
+  - SwitchBetweenPasswordAuthAndSaslauthdAuth
+  - ToggleLdapConfiguration
+  - ValidateHintedHandoffShortDowntime
   # Not run: supports_logstor = False in scylla-cluster-tests#16740.
   # sstable file operations (logstor tables have no sstables):
   - CorruptThenRebuildMonkey
@@ -105,3 +121,8 @@ nemesis_exclude_list:
   # Jenkins build #7 (scylla-staging/xtrey/sct/logstor), test_id 3c83a9d0-943e-48e1-8a1a-f201be4b67c6, branch-2026.4:latest.
   # Ran:
   - IsolateNodeWithProcessSignalNemesis  # failed: removenode streaming target node-4 aborted on logstor writeable_segment queue assert (SCYLLADB-5865)
+  # Jenkins build #8 (scylla-staging/xtrey/sct/logstor), test_id 3419e247-4566-4f38-b537-f506ce18066f, branch-2026.4:latest.
+  # Ran:
+  - SerialRestartOfElectedTopologyCoordinatorNemesis  # failed: node-1 restart failed: Storage wasn't found for tablet 227 (SCYLLADB-5866)
+  # Skipped: the nemesis skipped itself.
+  - NodeRestartWithResharding  # skipped: scylladb/scylladb#16739
