@@ -28,25 +28,6 @@ nemesis_exclude_list:
   - SlaReplaceUsingDetachDuringLoad  # SLA test only
   - SlaReplaceUsingDropDuringLoad  # SLA test only
   - ModifyTableTwcsWindowSizeMonkey  # no TWCS table
-  # Skipped: SCT saw the logstor table as empty (SCT-1380). Not really tested.
-  # Remove these lines after SCT-1380 is fixed.
-  - AddRemoveMvNemesis
-  - CreateIndexNemesis
-  - KillMVBuildingCoordinator
-  - ModifyTableBloomFilterFpChanceMonkey
-  - ModifyTableCachingMonkey
-  - ModifyTableCommentMonkey
-  - ModifyTableCompactionMonkey
-  - ModifyTableCompressionMonkey
-  - ModifyTableCrcCheckChanceMonkey
-  - ModifyTableDclocalReadRepairChanceMonkey
-  - ModifyTableDefaultTimeToLiveMonkey
-  - ModifyTableGcGraceTimeMonkey
-  - ModifyTableMaxIndexIntervalMonkey
-  - ModifyTableMemtableFlushPeriodInMsMonkey
-  - ModifyTableMinIndexIntervalMonkey
-  - ModifyTableReadRepairChanceMonkey
-  - ModifyTableSpeculativeRetryMonkey
   # Jenkins build #5, Argus run 6b7660d2-e627-45a0-b1f4-29ca1508dc88, 2026.4.0~rc1.
   - ToggleAuditNemesisSyslog  # failed: node-1 did not start after the restart (SCYLLADB-5866)
   # Jenkins build #7, Argus run a9792a7e-36e3-482a-b87b-0d5ec61a0dfc, 2026.4.0~rc1.
@@ -126,3 +107,25 @@ nemesis_exclude_list:
   - SerialRestartOfElectedTopologyCoordinatorNemesis  # failed: node-1 restart failed: Storage wasn't found for tablet 227 (SCYLLADB-5866)
   # Skipped: the nemesis skipped itself.
   - NodeRestartWithResharding  # skipped: scylladb/scylladb#16739
+  # Jenkins build #9 (scylla-staging/xtrey/sct/logstor), test_id ed44023e-02b5-4191-95e9-1d5275d736e4, branch-2026.4:latest. Test PASSED.
+  # Ran:
+  - AbortRepairMonkey  # succeeded
+  - MemoryStressMonkey  # succeeded
+  - MgmtRepair  # succeeded
+  - NemesisSequence  # succeeded
+  - NoCorruptRepairMonkey  # succeeded
+  - NodeToolCleanupMonkey  # succeeded
+  - RejectNodeExporterNetworkMonkey  # succeeded
+  - RejectThriftNetworkMonkey  # succeeded
+  - TopPartitions  # succeeded
+  - TruncateLargeParititionMonkey  # succeeded
+  - TruncateMonkey  # succeeded
+  # Skipped: the nemesis skipped itself.
+  - PauseLdapNemesis  # LDAP not configured
+  - SslHotReloadingNemesis  # server encryption not enabled
+  - DrainKubernetesNodeThenDecommissionAndAddScyllaNode  # k8s only
+  - DrainKubernetesNodeThenReplaceScyllaNode  # k8s only
+  - OperatorNodeReplace  # k8s only
+  - OperatorNodetoolFlushAndReshard  # k8s only
+  - TerminateKubernetesHostThenDecommissionAndAddScyllaNode  # k8s only
+  - TerminateKubernetesHostThenReplaceScyllaNode  # k8s only
