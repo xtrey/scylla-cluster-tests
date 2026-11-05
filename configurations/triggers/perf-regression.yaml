@@ -55,6 +55,7 @@ cron_triggers:
       scylla_version: "{branch}:latest"
       job_folder: "scylla-master"
       labels_selector: "logstor-weekly"
+      requested_by_user: "andrei.chekun"
 
 # Performance numbers are only comparable when every job of a run measures the same build,
 # so all jobs get the newest build published on every backend/region/arch in this matrix,
@@ -446,6 +447,7 @@ jobs:
     params:
       region: "us-east-1"
       sub_tests: '["test_mixed_gradual_increase_load"]'
+      requested_by_user: "andrei.chekun"
 
   - job_name: "/scylla-enterprise/perf-regression/logstor_hotspot"  # A1, hotspot
     backend: "aws"
@@ -464,6 +466,7 @@ jobs:
     params:
       region: "us-east-1"
       sub_tests: '["test_mixed_gradual_increase_load"]'
+      requested_by_user: "andrei.chekun"
 
   - job_name: "/scylla-enterprise/perf-regression/logstor_uniform_ec_twin"  # A0, the uniform workload on a regular LSM table
     backend: "aws"
@@ -482,6 +485,7 @@ jobs:
     params:
       region: "us-east-1"
       sub_tests: '["test_mixed_gradual_increase_load"]'
+      requested_by_user: "andrei.chekun"
 
   - job_name: "/scylla-enterprise/perf-regression/logstor_lsm_dual_60_40"  # A4, 60% logstor / 40% LSM on one cluster
     backend: "aws"
@@ -500,3 +504,4 @@ jobs:
     params:
       region: "us-east-1"
       sub_tests: '["test_dual_engine_mixed_gradual_increase_load"]'
+      requested_by_user: "andrei.chekun"
