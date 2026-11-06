@@ -134,3 +134,21 @@ nemesis_exclude_list:
   - AddRemoveMvNemesis  # failed: node-6 restart during MV build failed: Storage wasn't found for tablet 227 (SCYLLADB-5866)
   # Deferred, NOT tested yet: kills scylla on the MV building coordinator, a restart that failed with SCYLLADB-5866 in xtrey builds #3, #8 and #10.
   - KillMVBuildingCoordinator
+  # Jenkins build #11 (scylla-staging/xtrey/sct/logstor), test_id 0112a889-47f5-476d-8d1c-f5c8e94589ed, branch-2026.4:latest.
+  # Ran:
+  - CreateIndexNemesis  # failed: secondary index on keyspace1.standard1(C0) returned no rows ("Index does not work")
+  - AbortDecommissionMonkey  # failed: decommission streaming target node-5 aborted on logstor writeable_segment queue assert (SCYLLADB-5865)
+  - ModifyTableBloomFilterFpChanceMonkey  # succeeded
+  - ModifyTableCachingMonkey  # succeeded
+  - ModifyTableCommentMonkey  # succeeded
+  - ModifyTableCompactionMonkey  # succeeded
+  - ModifyTableCompressionMonkey  # succeeded
+  - ModifyTableCrcCheckChanceMonkey  # succeeded
+  - ModifyTableDclocalReadRepairChanceMonkey  # succeeded
+  - ModifyTableDefaultTimeToLiveMonkey  # succeeded
+  - ModifyTableGcGraceTimeMonkey  # succeeded
+  - ModifyTableMaxIndexIntervalMonkey  # succeeded
+  - ModifyTableMemtableFlushPeriodInMsMonkey  # succeeded
+  - ModifyTableMinIndexIntervalMonkey  # succeeded
+  - ModifyTableReadRepairChanceMonkey  # succeeded
+  - ModifyTableSpeculativeRetryMonkey  # succeeded
